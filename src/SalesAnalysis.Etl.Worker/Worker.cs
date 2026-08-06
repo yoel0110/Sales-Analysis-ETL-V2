@@ -1,3 +1,5 @@
+using SalesAnalysis.Etl.Worker.Data;
+using SalesAnalysis.Etl.Worker.Data.Entities;
 using SalesAnalysis.Etl.Worker.Extractors;
 using SalesAnalysis.Etl.Worker.Models;
 
@@ -6,6 +8,7 @@ namespace SalesAnalysis.Etl.Worker;
 public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
+    private readonly ICustomerDimRepository _customerDimRepository;
     private readonly IExtractor<CsvCustomerRecord> _csvCustomerExtractor;
     private readonly IExtractor<CsvProductRecord> _csvProductExtractor;
     private readonly IExtractor<CsvOrderRecord> _csvOrderExtractor;
@@ -15,6 +18,7 @@ public class Worker : BackgroundService
 
     public Worker(
         ILogger<Worker> logger,
+        ICustomerDimRepository customerDimRepository,
         IExtractor<CsvCustomerRecord> csvCustomerExtractor,
         IExtractor<CsvProductRecord> csvProductExtractor,
         IExtractor<CsvOrderRecord> csvOrderExtractor,
@@ -23,6 +27,7 @@ public class Worker : BackgroundService
         IExtractor<ApiProductRecord> apiProductExtractor)
     {
         _logger = logger;
+        _customerDimRepository = customerDimRepository;
         _csvCustomerExtractor = csvCustomerExtractor;
         _csvProductExtractor = csvProductExtractor;
         _csvOrderExtractor = csvOrderExtractor;
@@ -33,7 +38,20 @@ public class Worker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Worker iniciado. Se prepara la carga directa al Data Warehouse.");
-        await Task.CompletedTask;
+        _logger.LogInformation("Iniciando carga al Data Warehouse");
+
+        var customers = await _csvCustomerExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var customerEntities = customers.Select(c => new CustomerDim
+        {
+            CustomerId = c.CustomerId,
+            FullName = $"{c.FirstName} {c.LastName}",
+            CountryName = c.Country,
+            CityName = c.City
+        }).ToList();
+
+        await _customerDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await _customerDimRepository.BulkInsertAsync(customerEntities, stoppingToken).ConfigureAwait(false);
+
+        _logger.LogInformation("CustomerDim cargada con {Count} registros", customerEntities.Count);
     }
 }
