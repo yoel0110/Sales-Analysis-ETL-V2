@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using SalesAnalysis.Etl.Worker;
 using SalesAnalysis.Etl.Worker.Extractors;
 using SalesAnalysis.Etl.Worker.Models;
@@ -11,8 +12,11 @@ builder.Services.Configure<CsvSourceOptions>(builder.Configuration.GetSection("C
 builder.Services.Configure<ApiSourceOptions>(builder.Configuration.GetSection("ApiSources"));
 builder.Services.Configure<StagingOptions>(builder.Configuration.GetSection("Staging"));
 
-builder.Services.AddHttpClient<ApiCustomerExtractor>();
-builder.Services.AddHttpClient<ApiProductExtractor>();
+builder.Services.AddHttpClient("ApiClient", (sp, client) =>
+{
+    var options = sp.GetRequiredService<IOptions<ApiSourceOptions>>().Value;
+    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+});
 
 builder.Services.AddSingleton<IStagingWriter, JsonStagingWriter>();
 

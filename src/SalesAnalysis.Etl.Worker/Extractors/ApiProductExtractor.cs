@@ -7,15 +7,15 @@ namespace SalesAnalysis.Etl.Worker.Extractors;
 
 public sealed class ApiProductExtractor : IExtractor<ApiProductRecord>
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ApiSourceOptions _options;
     private readonly ILogger<ApiProductExtractor> _logger;
 
     public string SourceName => "API Products";
 
-    public ApiProductExtractor(HttpClient httpClient, IOptions<ApiSourceOptions> options, ILogger<ApiProductExtractor> logger)
+    public ApiProductExtractor(IHttpClientFactory httpClientFactory, IOptions<ApiSourceOptions> options, ILogger<ApiProductExtractor> logger)
     {
-        _httpClient = httpClient;
+        _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
     }
@@ -24,7 +24,8 @@ public sealed class ApiProductExtractor : IExtractor<ApiProductRecord>
     {
         _logger.LogInformation("Extrayendo {Source} desde {Url}", SourceName, _options.ProductsUrl);
 
-        var response = await _httpClient.GetAsync(_options.ProductsUrl, cancellationToken).ConfigureAwait(false);
+        var httpClient = _httpClientFactory.CreateClient("ApiClient");
+        var response = await httpClient.GetAsync(_options.ProductsUrl, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var records = await response.Content
