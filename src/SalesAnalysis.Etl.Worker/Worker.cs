@@ -8,51 +8,32 @@ namespace SalesAnalysis.Etl.Worker;
 
 public class Worker : BackgroundService
 {
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<Worker> _logger;
-    private readonly ICustomerDimRepository _customerDimRepository;
-    private readonly IProductDimRepository _productDimRepository;
-    private readonly IDateDimRepository _dateDimRepository;
-    private readonly IFactTableRepository _factTableRepository;
-    private readonly IExtractor<CsvCustomerRecord> _csvCustomerExtractor;
-    private readonly IExtractor<CsvProductRecord> _csvProductExtractor;
-    private readonly IExtractor<CsvOrderRecord> _csvOrderExtractor;
-    private readonly IExtractor<CsvOrderDetailRecord> _csvOrderDetailExtractor;
-    private readonly IExtractor<ApiCustomerRecord> _apiCustomerExtractor;
-    private readonly IExtractor<ApiProductRecord> _apiProductExtractor;
 
-    public Worker(
-        ILogger<Worker> logger,
-        ICustomerDimRepository customerDimRepository,
-        IProductDimRepository productDimRepository,
-        IDateDimRepository dateDimRepository,
-        IFactTableRepository factTableRepository,
-        IExtractor<CsvCustomerRecord> csvCustomerExtractor,
-        IExtractor<CsvProductRecord> csvProductExtractor,
-        IExtractor<CsvOrderRecord> csvOrderExtractor,
-        IExtractor<CsvOrderDetailRecord> csvOrderDetailExtractor,
-        IExtractor<ApiCustomerRecord> apiCustomerExtractor,
-        IExtractor<ApiProductRecord> apiProductExtractor)
+    public Worker(IServiceScopeFactory scopeFactory, ILogger<Worker> logger)
     {
+        _scopeFactory = scopeFactory;
         _logger = logger;
-        _customerDimRepository = customerDimRepository;
-        _productDimRepository = productDimRepository;
-        _dateDimRepository = dateDimRepository;
-        _factTableRepository = factTableRepository;
-        _csvCustomerExtractor = csvCustomerExtractor;
-        _csvProductExtractor = csvProductExtractor;
-        _csvOrderExtractor = csvOrderExtractor;
-        _csvOrderDetailExtractor = csvOrderDetailExtractor;
-        _apiCustomerExtractor = apiCustomerExtractor;
-        _apiProductExtractor = apiProductExtractor;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        using var scope = _scopeFactory.CreateScope();
+        var csvCustomerExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvCustomerRecord>>();
+        var csvProductExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvProductRecord>>();
+        var csvOrderExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvOrderRecord>>();
+        var csvOrderDetailExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvOrderDetailRecord>>();
+        var customerDimRepository = scope.ServiceProvider.GetRequiredService<ICustomerDimRepository>();
+        var productDimRepository = scope.ServiceProvider.GetRequiredService<IProductDimRepository>();
+        var dateDimRepository = scope.ServiceProvider.GetRequiredService<IDateDimRepository>();
+        var factTableRepository = scope.ServiceProvider.GetRequiredService<IFactTableRepository>();
+
         _logger.LogInformation("Iniciando carga al Data Warehouse");
 
-        await _factTableRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await factTableRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
 
-        var customers = await _csvCustomerExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var customers = await csvCustomerExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
         var customerEntities = customers.Select(c => new CustomerDim
         {
             CustomerId = c.CustomerId,
@@ -61,12 +42,12 @@ public class Worker : BackgroundService
             CityName = c.City
         }).ToList();
 
-        await _customerDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
-        await _customerDimRepository.BulkInsertAsync(customerEntities, stoppingToken).ConfigureAwait(false);
+        await customerDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await customerDimRepository.BulkInsertAsync(customerEntities, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation("CustomerDim cargada con {Count} registros", customerEntities.Count);
 
-        var products = await _csvProductExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var products = await csvProductExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
         var productPriceLookup = products.ToDictionary(p => p.ProductId, p => p.Price);
         var productEntities = products.Select(p => new ProductDim
         {
@@ -76,12 +57,12 @@ public class Worker : BackgroundService
             Price = p.Price
         }).ToList();
 
-        await _productDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
-        await _productDimRepository.BulkInsertAsync(productEntities, stoppingToken).ConfigureAwait(false);
+        await productDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await productDimRepository.BulkInsertAsync(productEntities, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation("ProductDim cargada con {Count} registros", productEntities.Count);
 
-        var orders = await _csvOrderExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var orders = await csvOrderExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
         var spanishCulture = new CultureInfo("es-ES");
         var dateEntities = orders
             .Select(o => o.OrderDate.Date)
@@ -100,16 +81,16 @@ public class Worker : BackgroundService
             })
             .ToList();
 
-        await _dateDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
-        await _dateDimRepository.BulkInsertAsync(dateEntities, stoppingToken).ConfigureAwait(false);
+        await dateDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await dateDimRepository.BulkInsertAsync(dateEntities, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation("DateDim cargada con {Count} registros", dateEntities.Count);
 
-        var orderDetails = await _csvOrderDetailExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var orderDetails = await csvOrderDetailExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
         var orderLookup = orders.ToDictionary(o => o.OrderId);
-        var customerDimLookup = await _customerDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
-        var productDimLookup = await _productDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
-        var dateDimLookup = await _dateDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
+        var customerDimLookup = await customerDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
+        var productDimLookup = await productDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
+        var dateDimLookup = await dateDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
 
         var factEntities = new List<FactTable>();
         int inconsistencyCount = 0;
@@ -179,7 +160,7 @@ public class Worker : BackgroundService
             });
         }
 
-        await _factTableRepository.BulkInsertAsync(factEntities, stoppingToken).ConfigureAwait(false);
+        await factTableRepository.BulkInsertAsync(factEntities, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "FactTable cargada con {Count} registros. Inconsistencias corregidas: {Inconsistencies}. Omitidos: {Skipped}.",
