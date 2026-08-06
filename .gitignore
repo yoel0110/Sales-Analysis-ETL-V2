@@ -427,3 +427,7 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# ETL generated staging files (keep folder with .gitkeep)
+staging/*.json
+staging/*.csv
