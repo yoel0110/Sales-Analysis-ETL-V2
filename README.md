@@ -1,6 +1,6 @@
-# Sales Analysis ETL - Actividad 1
+# Sales Analysis ETL
 
-Proyecto .NET 8 para la Actividad 1: Creación de la Arquitectura y Desarrollo del Proceso de Extracción del sistema de análisis de ventas.
+Proyecto .NET 8 para el sistema de análisis de ventas. Incluye extracción de datos desde archivos CSV y una API REST local, y carga directa a un Data Warehouse en SQL Server.
 
 ## Estructura
 
@@ -8,18 +8,21 @@ Proyecto .NET 8 para la Actividad 1: Creación de la Arquitectura y Desarrollo d
 Sales-Analysis-ETL-V2/
 ├── src/
 │   ├── SalesAnalysis.Api/          # API REST local conectada a la base transaccional
-│   └── SalesAnalysis.Etl.Worker/   # Worker Service que ejecuta el proceso de extracción
-├── data_sources/                    # Archivos CSV de entrada
-├── staging/                         # Archivos JSON generados por el Worker
+│   └── SalesAnalysis.Etl.Worker/   # Worker Service que ejecuta extracción y carga al DW
+│       └── data_sources/            # Archivos CSV de entrada
 └── SalesAnalysisEtl.slnx            # Solución .NET
 ```
 
 ## Requisitos
 
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- SQL Server con la base de datos `ventas_oltp` configurada
+- SQL Server con las bases de datos:
+  - `ventas_oltp` (base transaccional)
+  - `olap_ventas` (base analítica / Data Warehouse)
 
 ## Configuración
+
+### API local
 
 La API se conecta a la base transaccional mediante la cadena de conexión en `src/SalesAnalysis.Api/appsettings.json`:
 
@@ -29,14 +32,9 @@ La API se conecta a la base transaccional mediante la cadena de conexión en `sr
 }
 ```
 
-El Worker consume la API local mediante la configuración en `src/SalesAnalysis.Etl.Worker/appsettings.json`:
+### Worker
 
-```json
-"ApiSources": {
-  "CustomersUrl": "http://localhost:5000/api/customers",
-  "ProductsUrl": "http://localhost:5000/api/products"
-}
-```
+El Worker se conecta al Data Warehouse. La cadena de conexión se configura en `src/SalesAnalysis.Etl.Worker/appsettings.json`.
 
 ## Ejecución
 
@@ -59,7 +57,7 @@ La API expone los siguientes endpoints:
 
 ### 3. Ejecutar el Worker ETL
 
-En otra terminal, con la API en ejecución:
+En otra terminal:
 
 ```bash
 dotnet run --project src/SalesAnalysis.Etl.Worker
@@ -68,24 +66,12 @@ dotnet run --project src/SalesAnalysis.Etl.Worker
 El Worker realiza lo siguiente:
 
 - Extrae datos desde los archivos CSV en `data_sources/`.
-- Extrae clientes y productos desde la API REST local.
-- Guarda los datos extraídos como archivos JSON en `staging/`.
+- Extrae clientes y productos desde la API REST local (fuente disponible para uso futuro).
+- Carga las dimensiones `CustomerDim`, `ProductDim`, `DateDim` y la tabla de hechos `FactTable` en `olap_ventas`.
 - Registra eventos y métricas en la consola.
-
-## Archivos Staging Generados
-
-```text
-staging/csv_customers.json
-staging/csv_products.json
-staging/csv_orders.json
-staging/csv_order_details.json
-staging/api_customers.json
-staging/api_products.json
-```
 
 ## Notas
 
-- Esta actividad cubre únicamente la fase de **extracción** del proceso ETL.
-- No se implementa carga a base analítica ni dashboard en esta entrega.
-- La API REST local representa la fuente externa indicada en la definición del problema.
-- Los extractores están diseñados mediante interfaces para facilitar mantenibilidad y escalabilidad.
+- El Worker utiliza carga **Full Load**: trunca las tablas del DW y las vuelve a cargar.
+- La API REST local se mantiene como fuente externa aunque la carga actual use principalmente CSV.
+- Los extractores y repositorios están diseñados mediante interfaces para facilitar mantenibilidad y escalabilidad.
