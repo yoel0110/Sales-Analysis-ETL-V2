@@ -1,3 +1,4 @@
+using System.Globalization;
 using SalesAnalysis.Etl.Worker.Data;
 using SalesAnalysis.Etl.Worker.Data.Entities;
 using SalesAnalysis.Etl.Worker.Extractors;
@@ -10,6 +11,7 @@ public class Worker : BackgroundService
     private readonly ILogger<Worker> _logger;
     private readonly ICustomerDimRepository _customerDimRepository;
     private readonly IProductDimRepository _productDimRepository;
+    private readonly IDateDimRepository _dateDimRepository;
     private readonly IExtractor<CsvCustomerRecord> _csvCustomerExtractor;
     private readonly IExtractor<CsvProductRecord> _csvProductExtractor;
     private readonly IExtractor<CsvOrderRecord> _csvOrderExtractor;
@@ -21,6 +23,7 @@ public class Worker : BackgroundService
         ILogger<Worker> logger,
         ICustomerDimRepository customerDimRepository,
         IProductDimRepository productDimRepository,
+        IDateDimRepository dateDimRepository,
         IExtractor<CsvCustomerRecord> csvCustomerExtractor,
         IExtractor<CsvProductRecord> csvProductExtractor,
         IExtractor<CsvOrderRecord> csvOrderExtractor,
@@ -31,6 +34,7 @@ public class Worker : BackgroundService
         _logger = logger;
         _customerDimRepository = customerDimRepository;
         _productDimRepository = productDimRepository;
+        _dateDimRepository = dateDimRepository;
         _csvCustomerExtractor = csvCustomerExtractor;
         _csvProductExtractor = csvProductExtractor;
         _csvOrderExtractor = csvOrderExtractor;
@@ -70,5 +74,29 @@ public class Worker : BackgroundService
         await _productDimRepository.BulkInsertAsync(productEntities, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation("ProductDim cargada con {Count} registros", productEntities.Count);
+
+        var orders = await _csvOrderExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var spanishCulture = new CultureInfo("es-ES");
+        var dateEntities = orders
+            .Select(o => o.OrderDate.Date)
+            .Distinct()
+            .Select(date => new DateDim
+            {
+                DateDimId = int.Parse(date.ToString("yyyyMMdd")),
+                Fecha = date,
+                Day = date.Day,
+                DayName = date.ToString("dddd", spanishCulture),
+                IsWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday,
+                Month = date.Month,
+                MonthName = date.ToString("MMMM", spanishCulture),
+                Quarters = $"Q{(date.Month - 1) / 3 + 1}",
+                Year = date.Year
+            })
+            .ToList();
+
+        await _dateDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await _dateDimRepository.BulkInsertAsync(dateEntities, stoppingToken).ConfigureAwait(false);
+
+        _logger.LogInformation("DateDim cargada con {Count} registros", dateEntities.Count);
     }
 }
