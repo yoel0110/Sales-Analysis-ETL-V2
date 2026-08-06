@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SalesAnalysis.Api/SalesAnalysis.Api.csproj" />
+    <Project Path="src/SalesAnalysis.Etl.Worker/SalesAnalysis.Etl.Worker.csproj" />
+  </Folder>
+</Solution>
