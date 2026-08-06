@@ -16,8 +16,8 @@ public sealed class DateDimRepository : IDateDimRepository
 
     public async Task TruncateAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Truncando DateDim");
-        await _context.Database.ExecuteSqlRawAsync("TRUNCATE TABLE DateDim;", cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Vaciando DateDim");
+        await _context.Database.ExecuteSqlRawAsync("DELETE FROM DateDim;", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task BulkInsertAsync(IReadOnlyCollection<DateDim> entities, CancellationToken cancellationToken = default)

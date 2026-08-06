@@ -16,8 +16,8 @@ public sealed class ProductDimRepository : IProductDimRepository
 
     public async Task TruncateAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Truncando ProductDim");
-        await _context.Database.ExecuteSqlRawAsync("TRUNCATE TABLE ProductDim;", cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Vaciando ProductDim");
+        await _context.Database.ExecuteSqlRawAsync("DELETE FROM ProductDim;", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task BulkInsertAsync(IReadOnlyCollection<ProductDim> entities, CancellationToken cancellationToken = default)

@@ -16,8 +16,8 @@ public sealed class FactTableRepository : IFactTableRepository
 
     public async Task TruncateAsync(CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Truncando FactTable");
-        await _context.Database.ExecuteSqlRawAsync("TRUNCATE TABLE FactTable;", cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation("Vaciando FactTable");
+        await _context.Database.ExecuteSqlRawAsync("DELETE FROM FactTable;", cancellationToken).ConfigureAwait(false);
     }
 
     public async Task BulkInsertAsync(IReadOnlyCollection<FactTable> entities, CancellationToken cancellationToken = default)
