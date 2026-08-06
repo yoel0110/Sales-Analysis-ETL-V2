@@ -14,14 +14,14 @@ builder.Services.Configure<StagingOptions>(builder.Configuration.GetSection("Sta
 builder.Services.AddHttpClient<ApiCustomerExtractor>();
 builder.Services.AddHttpClient<ApiProductExtractor>();
 
-builder.Services.AddScoped<IStagingWriter, JsonStagingWriter>();
+builder.Services.AddSingleton<IStagingWriter, JsonStagingWriter>();
 
-builder.Services.AddScoped<IExtractor<CsvCustomerRecord>, CsvCustomerExtractor>();
-builder.Services.AddScoped<IExtractor<CsvProductRecord>, CsvProductExtractor>();
-builder.Services.AddScoped<IExtractor<CsvOrderRecord>, CsvOrderExtractor>();
-builder.Services.AddScoped<IExtractor<CsvOrderDetailRecord>, CsvOrderDetailExtractor>();
-builder.Services.AddScoped<IExtractor<ApiCustomerRecord>, ApiCustomerExtractor>();
-builder.Services.AddScoped<IExtractor<ApiProductRecord>, ApiProductExtractor>();
+builder.Services.AddSingleton<IExtractor<CsvCustomerRecord>, CsvCustomerExtractor>();
+builder.Services.AddSingleton<IExtractor<CsvProductRecord>, CsvProductExtractor>();
+builder.Services.AddSingleton<IExtractor<CsvOrderRecord>, CsvOrderExtractor>();
+builder.Services.AddSingleton<IExtractor<CsvOrderDetailRecord>, CsvOrderDetailExtractor>();
+builder.Services.AddSingleton<IExtractor<ApiCustomerRecord>, ApiCustomerExtractor>();
+builder.Services.AddSingleton<IExtractor<ApiProductRecord>, ApiProductExtractor>();
 
 var host = builder.Build();
 host.Run();
