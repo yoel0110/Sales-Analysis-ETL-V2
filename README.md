@@ -66,7 +66,6 @@ dotnet run --project src/SalesAnalysis.Etl.Worker
 El Worker realiza lo siguiente:
 
 - Extrae datos desde los archivos CSV en `src/SalesAnalysis.Etl.Worker/data_sources/`.
-- Extrae clientes y productos desde la API REST local (fuente disponible para uso futuro).
 - Carga las dimensiones `CustomerDim`, `ProductDim` y `DateDim` en `olap_ventas`.
 - Carga la tabla de hechos `FactTable` en `olap_ventas`.
 - Valida y corrige inconsistencias en `TotalPrice` recalculando `Quantity * Price`.
