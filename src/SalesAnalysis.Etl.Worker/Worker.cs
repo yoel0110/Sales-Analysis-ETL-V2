@@ -9,6 +9,7 @@ public class Worker : BackgroundService
 {
     private readonly ILogger<Worker> _logger;
     private readonly ICustomerDimRepository _customerDimRepository;
+    private readonly IProductDimRepository _productDimRepository;
     private readonly IExtractor<CsvCustomerRecord> _csvCustomerExtractor;
     private readonly IExtractor<CsvProductRecord> _csvProductExtractor;
     private readonly IExtractor<CsvOrderRecord> _csvOrderExtractor;
@@ -19,6 +20,7 @@ public class Worker : BackgroundService
     public Worker(
         ILogger<Worker> logger,
         ICustomerDimRepository customerDimRepository,
+        IProductDimRepository productDimRepository,
         IExtractor<CsvCustomerRecord> csvCustomerExtractor,
         IExtractor<CsvProductRecord> csvProductExtractor,
         IExtractor<CsvOrderRecord> csvOrderExtractor,
@@ -28,6 +30,7 @@ public class Worker : BackgroundService
     {
         _logger = logger;
         _customerDimRepository = customerDimRepository;
+        _productDimRepository = productDimRepository;
         _csvCustomerExtractor = csvCustomerExtractor;
         _csvProductExtractor = csvProductExtractor;
         _csvOrderExtractor = csvOrderExtractor;
@@ -53,5 +56,19 @@ public class Worker : BackgroundService
         await _customerDimRepository.BulkInsertAsync(customerEntities, stoppingToken).ConfigureAwait(false);
 
         _logger.LogInformation("CustomerDim cargada con {Count} registros", customerEntities.Count);
+
+        var products = await _csvProductExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+        var productEntities = products.Select(p => new ProductDim
+        {
+            ProductId = p.ProductId,
+            ProductName = p.ProductName,
+            CategoryName = p.Category,
+            Price = p.Price
+        }).ToList();
+
+        await _productDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+        await _productDimRepository.BulkInsertAsync(productEntities, stoppingToken).ConfigureAwait(false);
+
+        _logger.LogInformation("ProductDim cargada con {Count} registros", productEntities.Count);
     }
 }
