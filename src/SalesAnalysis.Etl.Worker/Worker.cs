@@ -1,82 +1,202 @@
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
+using System.Globalization;
+using SalesAnalysis.Etl.Worker.Data;
+using SalesAnalysis.Etl.Worker.Data.Entities;
 using SalesAnalysis.Etl.Worker.Extractors;
 using SalesAnalysis.Etl.Worker.Models;
-using SalesAnalysis.Etl.Worker.Options;
-using SalesAnalysis.Etl.Worker.Staging;
 
 namespace SalesAnalysis.Etl.Worker;
 
 public class Worker : BackgroundService
 {
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<Worker> _logger;
-    private readonly IStagingWriter _stagingWriter;
-    private readonly StagingOptions _stagingOptions;
-    private readonly IExtractor<CsvCustomerRecord> _csvCustomerExtractor;
-    private readonly IExtractor<CsvProductRecord> _csvProductExtractor;
-    private readonly IExtractor<CsvOrderRecord> _csvOrderExtractor;
-    private readonly IExtractor<CsvOrderDetailRecord> _csvOrderDetailExtractor;
-    private readonly IExtractor<ApiCustomerRecord> _apiCustomerExtractor;
-    private readonly IExtractor<ApiProductRecord> _apiProductExtractor;
 
-    public Worker(
-        ILogger<Worker> logger,
-        IStagingWriter stagingWriter,
-        IOptions<StagingOptions> stagingOptions,
-        IExtractor<CsvCustomerRecord> csvCustomerExtractor,
-        IExtractor<CsvProductRecord> csvProductExtractor,
-        IExtractor<CsvOrderRecord> csvOrderExtractor,
-        IExtractor<CsvOrderDetailRecord> csvOrderDetailExtractor,
-        IExtractor<ApiCustomerRecord> apiCustomerExtractor,
-        IExtractor<ApiProductRecord> apiProductExtractor)
+    public Worker(IServiceScopeFactory scopeFactory, ILogger<Worker> logger)
     {
+        _scopeFactory = scopeFactory;
         _logger = logger;
-        _stagingWriter = stagingWriter;
-        _stagingOptions = stagingOptions.Value;
-        _csvCustomerExtractor = csvCustomerExtractor;
-        _csvProductExtractor = csvProductExtractor;
-        _csvOrderExtractor = csvOrderExtractor;
-        _csvOrderDetailExtractor = csvOrderDetailExtractor;
-        _apiCustomerExtractor = apiCustomerExtractor;
-        _apiProductExtractor = apiProductExtractor;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        _logger.LogInformation("Iniciando proceso de extraccion del ETL");
 
-        Directory.CreateDirectory(_stagingOptions.OutputPath);
-
-        await ExtractAndStageAsync(_csvCustomerExtractor, "csv_customers.json", stoppingToken);
-        await ExtractAndStageAsync(_csvProductExtractor, "csv_products.json", stoppingToken);
-        await ExtractAndStageAsync(_csvOrderExtractor, "csv_orders.json", stoppingToken);
-        await ExtractAndStageAsync(_csvOrderDetailExtractor, "csv_order_details.json", stoppingToken);
-        await ExtractAndStageAsync(_apiCustomerExtractor, "api_customers.json", stoppingToken);
-        await ExtractAndStageAsync(_apiProductExtractor, "api_products.json", stoppingToken);
-
-        stopwatch.Stop();
-        _logger.LogInformation("Proceso de extraccion completado en {ElapsedMs} ms", stopwatch.ElapsedMilliseconds);
-    }
-
-    private async Task ExtractAndStageAsync<T>(IExtractor<T> extractor, string stagingFileName, CancellationToken cancellationToken)
-    {
         try
         {
-            var stopwatch = Stopwatch.StartNew();
-            var records = await extractor.ExtractAsync(cancellationToken).ConfigureAwait(false);
-            stopwatch.Stop();
+            using var scope = _scopeFactory.CreateScope();
+            var csvCustomerExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvCustomerRecord>>();
+            var csvProductExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvProductRecord>>();
+            var csvOrderExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvOrderRecord>>();
+            var csvOrderDetailExtractor = scope.ServiceProvider.GetRequiredService<IExtractor<CsvOrderDetailRecord>>();
+            var customerDimRepository = scope.ServiceProvider.GetRequiredService<ICustomerDimRepository>();
+            var productDimRepository = scope.ServiceProvider.GetRequiredService<IProductDimRepository>();
+            var dateDimRepository = scope.ServiceProvider.GetRequiredService<IDateDimRepository>();
+            var factTableRepository = scope.ServiceProvider.GetRequiredService<IFactTableRepository>();
 
-            await _stagingWriter.WriteAsync(stagingFileName, records, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Iniciando carga al Data Warehouse");
+
+            await factTableRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+            _logger.LogInformation("FactTable truncada");
+
+            var customers = await csvCustomerExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+            _logger.LogInformation("Clientes extraidos del CSV: {Count}", customers.Count);
+
+            var customerEntities = customers.Select(c => new CustomerDim
+            {
+                CustomerId = c.CustomerId,
+                FullName = $"{c.FirstName} {c.LastName}",
+                CountryName = c.Country,
+                CityName = c.City
+            }).ToList();
+
+            await customerDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+            await customerDimRepository.BulkInsertAsync(customerEntities, stoppingToken).ConfigureAwait(false);
+
+            _logger.LogInformation("CustomerDim cargada con {Count} registros", customerEntities.Count);
+
+            var products = await csvProductExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+            _logger.LogInformation("Productos extraidos del CSV: {Count}", products.Count);
+
+            var productPriceLookup = products.ToDictionary(p => p.ProductId, p => p.Price);
+            var productEntities = products.Select(p => new ProductDim
+            {
+                ProductId = p.ProductId,
+                ProductName = p.ProductName,
+                CategoryName = p.Category,
+                Price = p.Price
+            }).ToList();
+
+            await productDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+            await productDimRepository.BulkInsertAsync(productEntities, stoppingToken).ConfigureAwait(false);
+
+            _logger.LogInformation("ProductDim cargada con {Count} registros", productEntities.Count);
+
+            var orders = await csvOrderExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+            _logger.LogInformation("Ordenes extraidas del CSV: {Count}", orders.Count);
+
+            var spanishCulture = new CultureInfo("es-ES");
+            var dateEntities = orders
+                .Select(o => o.OrderDate.Date)
+                .Distinct()
+                .Select(date => new DateDim
+                {
+                    DateDimId = int.Parse(date.ToString("yyyyMMdd")),
+                    Fecha = date,
+                    Day = date.Day,
+                    DayName = date.ToString("dddd", spanishCulture),
+                    IsWeekend = date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday,
+                    Month = date.Month,
+                    MonthName = date.ToString("MMMM", spanishCulture),
+                    Quarters = $"Q{(date.Month - 1) / 3 + 1}",
+                    Year = date.Year
+                })
+                .ToList();
+
+            await dateDimRepository.TruncateAsync(stoppingToken).ConfigureAwait(false);
+            await dateDimRepository.BulkInsertAsync(dateEntities, stoppingToken).ConfigureAwait(false);
+
+            _logger.LogInformation("DateDim cargada con {Count} registros", dateEntities.Count);
+
+            var orderDetails = await csvOrderDetailExtractor.ExtractAsync(stoppingToken).ConfigureAwait(false);
+            _logger.LogInformation("Detalles de orden extraidos del CSV: {Count}", orderDetails.Count);
+
+            var orderLookup = orders.ToDictionary(o => o.OrderId);
+            var customerDimLookup = await customerDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
+            var productDimLookup = await productDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
+            var dateDimLookup = await dateDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
+
             _logger.LogInformation(
-                "{Source}: extraccion y staging completados en {ElapsedMs} ms. Registros: {Count}",
-                extractor.SourceName,
+                "Lookups obtenidos - CustomerDim: {CustomerCount}, ProductDim: {ProductCount}, DateDim: {DateCount}",
+                customerDimLookup.Count,
+                productDimLookup.Count,
+                dateDimLookup.Count);
+
+            var factEntities = new List<FactTable>();
+            int inconsistencyCount = 0;
+            int skippedCount = 0;
+
+            foreach (var detail in orderDetails)
+            {
+                if (!orderLookup.TryGetValue(detail.OrderId, out var order))
+                {
+                    _logger.LogWarning("OrderID {OrderId} no encontrado. Se omite detalle.", detail.OrderId);
+                    skippedCount++;
+                    continue;
+                }
+
+                if (!customerDimLookup.TryGetValue(order.CustomerId, out var customerDimId))
+                {
+                    _logger.LogWarning("CustomerID {CustomerId} no encontrado en CustomerDim. Se omite detalle.", order.CustomerId);
+                    skippedCount++;
+                    continue;
+                }
+
+                if (!productDimLookup.TryGetValue(detail.ProductId, out var productDimId))
+                {
+                    _logger.LogWarning("ProductID {ProductId} no encontrado en ProductDim. Se omite detalle.", detail.ProductId);
+                    skippedCount++;
+                    continue;
+                }
+
+                var orderDate = order.OrderDate.Date;
+                if (!dateDimLookup.TryGetValue(orderDate, out var dateDimId))
+                {
+                    _logger.LogWarning("Fecha {OrderDate} no encontrada en DateDim. Se omite detalle.", orderDate);
+                    skippedCount++;
+                    continue;
+                }
+
+                if (!productPriceLookup.TryGetValue(detail.ProductId, out var unitPrice))
+                {
+                    _logger.LogWarning("ProductID {ProductId} no encontrado en productos para recalcular precio. Se omite detalle.", detail.ProductId);
+                    skippedCount++;
+                    continue;
+                }
+
+                var calculatedTotalPrice = detail.Quantity * unitPrice;
+                var finalTotalPrice = detail.TotalPrice;
+
+                if (calculatedTotalPrice != finalTotalPrice)
+                {
+                    _logger.LogWarning(
+                        "Inconsistencia detectada: OrderID={OrderId}, ProductID={ProductId}, Original={Original}, Recalculado={Recalculado}. Se usa el valor recalculado.",
+                        detail.OrderId,
+                        detail.ProductId,
+                        finalTotalPrice,
+                        calculatedTotalPrice);
+                    finalTotalPrice = calculatedTotalPrice;
+                    inconsistencyCount++;
+                }
+
+                factEntities.Add(new FactTable
+                {
+                    OrderId = detail.OrderId,
+                    CustomerDimId = customerDimId,
+                    ProductDimId = productDimId,
+                    DateDimId = dateDimId,
+                    Quantity = detail.Quantity,
+                    TotalPrice = finalTotalPrice
+                });
+            }
+
+            await factTableRepository.BulkInsertAsync(factEntities, stoppingToken).ConfigureAwait(false);
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "Carga al Data Warehouse completada en {ElapsedMs} ms. FactTable: {Count} registros. Inconsistencias corregidas: {Inconsistencies}. Omitidos: {Skipped}.",
                 stopwatch.ElapsedMilliseconds,
-                records.Count);
+                factEntities.Count,
+                inconsistencyCount,
+                skippedCount);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error extrayendo {Source}: {Message}", extractor.SourceName, ex.Message);
+            stopwatch.Stop();
+            _logger.LogError(ex, "Error durante la carga al Data Warehouse: {Message}", ex.Message);
+            throw;
         }
+
+        await Task.Delay(2000, stoppingToken).ConfigureAwait(false);
     }
 }
