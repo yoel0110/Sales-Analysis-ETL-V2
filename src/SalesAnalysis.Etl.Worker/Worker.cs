@@ -102,17 +102,7 @@ public class Worker : BackgroundService
             _logger.LogInformation("Detalles de orden extraidos del CSV: {Count}", orderDetails.Count);
 
             var orderLookup = orders.ToDictionary(o => o.OrderId);
-            var customerDimLookup = await customerDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
-            var productDimLookup = await productDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
-            var dateDimLookup = await dateDimRepository.GetLookupAsync(stoppingToken).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Lookups obtenidos - CustomerDim: {CustomerCount}, ProductDim: {ProductCount}, DateDim: {DateCount}",
-                customerDimLookup.Count,
-                productDimLookup.Count,
-                dateDimLookup.Count);
-
-            var factEntities = new List<FactTable>();
+            var factRecords = new List<FactTableLoadRecord>();
             int inconsistencyCount = 0;
             int skippedCount = 0;
 
@@ -125,28 +115,7 @@ public class Worker : BackgroundService
                     continue;
                 }
 
-                if (!customerDimLookup.TryGetValue(order.CustomerId, out var customerDimId))
-                {
-                    _logger.LogWarning("CustomerID {CustomerId} no encontrado en CustomerDim. Se omite detalle.", order.CustomerId);
-                    skippedCount++;
-                    continue;
-                }
-
-                if (!productDimLookup.TryGetValue(detail.ProductId, out var productDimId))
-                {
-                    _logger.LogWarning("ProductID {ProductId} no encontrado en ProductDim. Se omite detalle.", detail.ProductId);
-                    skippedCount++;
-                    continue;
-                }
-
                 var orderDate = order.OrderDate.Date;
-                if (!dateDimLookup.TryGetValue(orderDate, out var dateDimId))
-                {
-                    _logger.LogWarning("Fecha {OrderDate} no encontrada en DateDim. Se omite detalle.", orderDate);
-                    skippedCount++;
-                    continue;
-                }
-
                 if (!productPriceLookup.TryGetValue(detail.ProductId, out var unitPrice))
                 {
                     _logger.LogWarning("ProductID {ProductId} no encontrado en productos para recalcular precio. Se omite detalle.", detail.ProductId);
@@ -169,24 +138,24 @@ public class Worker : BackgroundService
                     inconsistencyCount++;
                 }
 
-                factEntities.Add(new FactTable
+                factRecords.Add(new FactTableLoadRecord
                 {
                     OrderId = detail.OrderId,
-                    CustomerDimId = customerDimId,
-                    ProductDimId = productDimId,
-                    DateDimId = dateDimId,
+                    CustomerId = order.CustomerId,
+                    ProductId = detail.ProductId,
+                    OrderDate = orderDate,
                     Quantity = detail.Quantity,
                     TotalPrice = finalTotalPrice
                 });
             }
 
-            await factTableRepository.BulkInsertAsync(factEntities, stoppingToken).ConfigureAwait(false);
+            await factTableRepository.BulkInsertAsync(factRecords, stoppingToken).ConfigureAwait(false);
 
             stopwatch.Stop();
             _logger.LogInformation(
                 "Carga al Data Warehouse completada en {ElapsedMs} ms. FactTable: {Count} registros. Inconsistencias corregidas: {Inconsistencies}. Omitidos: {Skipped}.",
                 stopwatch.ElapsedMilliseconds,
-                factEntities.Count,
+                factRecords.Count,
                 inconsistencyCount,
                 skippedCount);
         }
